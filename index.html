@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Christmas lights</title>
+  <title>Lights</title>
   <style>
     body { font-family: Arial, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
     .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-top: 14px; }
@@ -26,8 +26,6 @@
     }
     input:checked + .slider { background: #4caf50; }
     input:checked + .slider:before { transform: translateX(26px); }
-
-    button { padding: 10px 12px; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -35,8 +33,6 @@
 
   <div class="card">
     Status: <span id="conn" class="bad">disconnected</span>
-    <div class="hint">This page reads state topics, so the switches show reality.</div>
-    <button id="reconnect">Reconnect</button>
   </div>
 
   <div class="card">
@@ -79,7 +75,7 @@
     const CFG = {
       host: "e70d2ac8d4e84026b8be8dd48456d4c5.s1.eu.hivemq.cloud",
       username: "Github",
-      password: "DupaKupa2137", //hehe pen password easter egg FFS
+      password: "DupaKupa2137",
       deviceName: "ZapoLights",
       wsPort: 8884,
       wsPath: "/mqtt"
@@ -87,8 +83,6 @@
 
     let client = null;
     const lastState = { 1: null, 2: null, 3: null };
-    const cooldownMs = 1200;
-    const lastClickAt = { 1: 0, 2: 0, 3: 0 };
 
     function setConn(text, ok) {
       const el = document.getElementById("conn");
@@ -96,26 +90,24 @@
       el.className = ok ? "ok" : "bad";
     }
 
+    function hint(n, txt) { document.getElementById("h" + n).textContent = txt; }
     function tAction(n) { return "netio/" + CFG.deviceName + "/output/" + n + "/action"; }
     function tState(n)  { return "netio/" + CFG.deviceName + "/output/" + n + "/state"; }
 
-    function hint(n, txt) { document.getElementById("h" + n).textContent = txt; }
-
     function publishSet(n, on) {
-      const now = Date.now();
-      if (now - lastClickAt[n] < cooldownMs) return;
-      lastClickAt[n] = now;
-
       if (!client || !client.connected) return;
       const payload = on ? "1" : "0";
       client.publish(tAction(n), payload, { qos: 0, retain: false });
-      hint(n, "sent " + payload + ", waiting for device");
+      hint(n, "sent");
+    }
+
+    function wire(n) {
+      const cb = document.getElementById("s" + n);
+      cb.addEventListener("change", (e) => publishSet(n, e.target.checked));
     }
 
     function connect() {
       const url = "wss://" + CFG.host + ":" + CFG.wsPort + CFG.wsPath;
-
-      if (client) { try { client.end(true); } catch (e) {} }
       setConn("connecting", false);
 
       client = mqtt.connect(url, {
@@ -150,16 +142,8 @@
       });
     }
 
-    function wire(n) {
-      const cb = document.getElementById("s" + n);
-      cb.addEventListener("change", (e) => publishSet(n, e.target.checked));
-    }
-
-    document.getElementById("reconnect").addEventListener("click", connect);
     wire(1); wire(2); wire(3);
     connect();
   </script>
 </body>
 </html>
-
-
