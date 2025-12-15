@@ -1,55 +1,163 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT Control Panel for ZapoLights</title>
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Christmas lights</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-top: 14px; }
+    .row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+    .row:last-child { border-bottom: 0; }
+    .hint { font-size: 12px; opacity: 0.8; }
+    .ok { color: #0a0; }
+    .bad { color: #b00; }
+
+    .switch { position: relative; display: inline-block; width: 56px; height: 30px; }
+    .switch input { display: none; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; border-radius: 30px; transition: 0.15s; }
+    .slider:before {
+      position: absolute; content: "";
+      height: 24px; width: 24px;
+      left: 3px; top: 3px;
+      background: white; border-radius: 50%;
+      transition: 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+    }
+    input:checked + .slider { background: #4caf50; }
+    input:checked + .slider:before { transform: translateX(26px); }
+
+    button { padding: 10px 12px; cursor: pointer; }
+  </style>
 </head>
 <body>
-    <h1>MQTT Control Panel for ZapoLights</h1>
-    <button id="turnOnButton">Turn On Outlet 1</button>
-    <p id="status">Status: Disconnected</p>
+  <h1>Christmas lights</h1>
 
-    
-<iframe width="560" height="315" src="https://www.youtube.com/embed/bdGVd342Qpw?si=s1ngLSW19KkAhjIW" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-    <script>
-        // Konfiguracja połączenia MQTT
-        const brokerUrl = "wss://e70d2ac8d4e84026b8be8dd48456d4c5.s1.eu.hivemq.cloud:8884/mqtt";
-        const topic = "netio/PowerBOX-B3/output/1/action";
+  <div class="card">
+    Status: <span id="conn" class="bad">disconnected</span>
+    <div class="hint">This page reads state topics, so the switches show reality.</div>
+    <button id="reconnect">Reconnect</button>
+  </div>
 
-        // Dane logowania
-        const options = {
-            username: "ZapoLights",     // Podaj swój login
-            password: "DupaKupa2137",     // Podaj swoje hasło
-        };
+  <div class="card">
+    <div class="row">
+      <div>
+        <strong>Socket 1</strong>
+        <div class="hint" id="h1">unknown</div>
+      </div>
+      <label class="switch">
+        <input id="s1" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
 
-        // Połączenie z brokerem z autoryzacją
-        const client = mqtt.connect(brokerUrl, options);
+    <div class="row">
+      <div>
+        <strong>Socket 2</strong>
+        <div class="hint" id="h2">unknown</div>
+      </div>
+      <label class="switch">
+        <input id="s2" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
 
-        client.on('connect', () => {
-            document.getElementById('status').innerText = "Status: Connected";
-        });
+    <div class="row">
+      <div>
+        <strong>Socket 3</strong>
+        <div class="hint" id="h3">unknown</div>
+      </div>
+      <label class="switch">
+        <input id="s3" type="checkbox" />
+        <span class="slider"></span>
+      </label>
+    </div>
+  </div>
 
-        client.on('error', (err) => {
-            document.getElementById('status').innerText = "Status: Error - " + err.message;
-        });
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script>
+    const CFG = {
+      host: "e70d2ac8d4e84026b8be8dd48456d4c5.s1.eu.hivemq.cloud,
+      username: "Github,
+      password: "DupaKupa2137", //hehe pen password easter egg FFS
+      deviceName: "ZapoLights",
+      wsPort: 8884,
+      wsPath: "/mqtt"
+    };
 
-        // Funkcja do publikowania wiadomości
-        function sendMessage(message) {
-            client.publish(topic, message, { qos: 0 }, (err) => {
-                if (err) {
-                    alert("Error publishing message: " + err.message);
-                } else {
-                    alert("Message sent: " + message);
-                }
-            });
-        }
+    let client = null;
+    const lastState = { 1: null, 2: null, 3: null };
+    const cooldownMs = 1200;
+    const lastClickAt = { 1: 0, 2: 0, 3: 0 };
 
-         // Obsługa przycisku
-        document.getElementById('turnOnButton').addEventListener('click', () => {
-            sendMessage("4"); // Wiadomość '4' do uruchomienia gniazda 1
-        });
-    </script>
+    function setConn(text, ok) {
+      const el = document.getElementById("conn");
+      el.textContent = text;
+      el.className = ok ? "ok" : "bad";
+    }
+
+    function tAction(n) { return "netio/" + CFG.deviceName + "/output/" + n + "/action"; }
+    function tState(n)  { return "netio/" + CFG.deviceName + "/output/" + n + "/state"; }
+
+    function hint(n, txt) { document.getElementById("h" + n).textContent = txt; }
+
+    function publishSet(n, on) {
+      const now = Date.now();
+      if (now - lastClickAt[n] < cooldownMs) return;
+      lastClickAt[n] = now;
+
+      if (!client || !client.connected) return;
+      const payload = on ? "1" : "0";
+      client.publish(tAction(n), payload, { qos: 0, retain: false });
+      hint(n, "sent " + payload + ", waiting for device");
+    }
+
+    function connect() {
+      const url = "wss://" + CFG.host + ":" + CFG.wsPort + CFG.wsPath;
+
+      if (client) { try { client.end(true); } catch (e) {} }
+      setConn("connecting", false);
+
+      client = mqtt.connect(url, {
+        username: CFG.username,
+        password: CFG.password,
+        clean: true,
+        reconnectPeriod: 1000,
+        connectTimeout: 6000
+      });
+
+      client.on("connect", () => {
+        setConn("connected", true);
+        client.subscribe([tState(1), tState(2), tState(3)], { qos: 0 });
+      });
+
+      client.on("reconnect", () => setConn("reconnecting", false));
+      client.on("close", () => setConn("disconnected", false));
+      client.on("error", () => setConn("error", false));
+
+      client.on("message", (topic, payload) => {
+        const msg = payload.toString().trim();
+        const m = topic.match(/\/output\/(\d+)\/state$/);
+        if (!m) return;
+
+        const n = parseInt(m[1], 10);
+        const on = (msg === "1" || msg.toLowerCase() === "true" || msg.toLowerCase() === "on");
+        lastState[n] = on;
+
+        const cb = document.getElementById("s" + n);
+        cb.checked = on;
+        hint(n, on ? "on" : "off");
+      });
+    }
+
+    function wire(n) {
+      const cb = document.getElementById("s" + n);
+      cb.addEventListener("change", (e) => publishSet(n, e.target.checked));
+    }
+
+    document.getElementById("reconnect").addEventListener("click", connect);
+    wire(1); wire(2); wire(3);
+    connect();
+  </script>
 </body>
 </html>
